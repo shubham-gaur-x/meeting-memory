@@ -15,6 +15,7 @@ import os
 import sys
 from datetime import datetime, timezone
 from pathlib import Path
+from typing import Any
 
 from dateutil import parser as dateparser
 from dotenv import load_dotenv
@@ -70,7 +71,33 @@ def load_sample_messages(folder: Path) -> list[GmailMessage]:
     return msgs
 
 
-def process(messages, vault: Path, state: State, *, dry: bool) -> dict:
+def _push_to_jira(client: Any, ex: Any, note_path: str, message_id: str, state: State) -> None:
+    """Push meeting action items to Jira. Errors are caught and logged — never fatal."""
+    try:
+        from lib.jira_pusher import push_meeting  # lazy import — zero overhead when Jira disabled
+        from datetime import timezone
+        project_key = os.getenv("JIRA_PROJECT_KEY", "")
+        issue_type = os.getenv("JIRA_ISSUE_TYPE", "Task")
+        create_decisions = os.getenv("JIRA_CREATE_DECISIONS", "false").lower() == "true"
+        if not project_key:
+            return
+        issues = push_meeting(
+            client, ex, note_path, message_id,
+            project_key=project_key,
+            issue_type=issue_type,
+            create_decisions=create_decisions,
+            board_id=os.getenv("JIRA_BOARD_ID"),
+        )
+        if issues:
+            pushed_at = datetime.now(tz=timezone.utc).isoformat()
+            state.mark_jira(message_id, issues, pushed_at)
+            for issue in issues:
+                console.print(f"  [cyan]jira[/cyan] {issue['key']} — {issue['summary'][:60]}")
+    except Exception as exc:
+        console.print(f"  [yellow]jira push failed (non-fatal):[/yellow] {exc}")
+
+
+def process(messages, vault: Path, state: State, *, dry: bool, jira_client: Any | None = None) -> dict:
     summary = {"total": 0, "skipped_seen": 0, "skipped_not_meeting": 0, "written": 0, "low_confidence": 0}
     for msg in messages:
         summary["total"] += 1
@@ -100,6 +127,8 @@ def process(messages, vault: Path, state: State, *, dry: bool) -> dict:
             continue
         path = write_meeting(vault, msg, ex)
         state.mark(msg.message_id, str(path), kind=ex.kind, confidence=ex.confidence)
+        if jira_client is not None:
+            _push_to_jira(jira_client, ex, str(path), msg.message_id, state)
         summary["written"] += 1
         console.print(f"  [green]wrote[/green] {path.relative_to(vault.parent)}")
     return summary
@@ -120,6 +149,18 @@ def main() -> int:
     vault_path.mkdir(parents=True, exist_ok=True)
     state = State(HERE / "state.json")
 
+    # Initialize Jira client if enabled
+    jira_client = None
+    if os.getenv("JIRA_ENABLED", "false").lower() == "true" and not args.dry_run:
+        try:
+            from lib.jira_client import JiraClient, JiraError
+            jira_client = JiraClient()
+            me = jira_client.get_myself()
+            console.print(f"[cyan]Jira:[/cyan] connected as {me.get('displayName', '?')}")
+        except Exception as exc:
+            console.print(f"[yellow]Jira init failed, auto-push disabled:[/yellow] {exc}")
+            jira_client = None
+
     if args.sample:
         folder = Path(args.sample).resolve()
         console.print(f"[bold]Loading sample messages[/bold] from {folder}")
@@ -133,7 +174,7 @@ def main() -> int:
         console.print(f"[bold]Gmail query:[/bold] {query}")
         messages = gmail.iter_messages(query=query, max_results=args.limit)
 
-    summary = process(messages, vault_path, state, dry=args.dry_run)
+    summary = process(messages, vault_path, state, dry=args.dry_run, jira_client=jira_client)
     state.set_last_run(datetime.now(timezone.utc).isoformat())
     state.save()
 

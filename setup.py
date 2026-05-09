@@ -399,6 +399,135 @@ def step_gmail_oauth(api_key: str, existing: dict[str, str]) -> str:
     sys.exit(1)
 
 
+# ── Step 6: Jira Integration (optional) ──────────────────────────────────────
+
+
+def step_jira(existing: dict[str, str]) -> dict[str, str]:
+    """Collect and validate Jira credentials. Returns {} if user skips."""
+    import base64
+
+    _rule("Step 6 — Jira Integration (optional)")
+    print("  Auto-create Jira stories from meeting action items.")
+    print("  Skip this step if you don't use Jira → just press Enter.")
+
+    # Re-run protection
+    if existing.get("JIRA_ENABLED") == "true":
+        domain = existing.get("JIRA_DOMAIN", "?")
+        ans = _prompt(f"Jira already configured ({domain}). Reconfigure? [y/N]", default="N").upper()
+        if ans != "Y":
+            _ok("Keeping existing Jira config")
+            return {}
+
+    domain = _prompt("Jira domain (e.g. company.atlassian.net) — or Enter to skip")
+    if not domain:
+        _ok("Skipping Jira setup")
+        return {}
+
+    domain = domain.strip().lstrip("https://").rstrip("/")
+
+    email = _prompt("Jira account email")
+    if not email:
+        _ok("Skipping Jira setup")
+        return {}
+
+    token = _prompt("Jira API token (https://id.atlassian.com/manage-profile/security/api-tokens)")
+    if not token:
+        _ok("Skipping Jira setup")
+        return {}
+
+    project_key = _prompt("Jira project key (e.g. PROJ, ENG, SCRUM)")
+    if not project_key:
+        _ok("Skipping Jira setup")
+        return {}
+    project_key = project_key.strip().upper()
+
+    # Validate credentials
+    creds = base64.b64encode(f"{email}:{token}".encode()).decode()
+    headers = {
+        "Authorization": f"Basic {creds}",
+        "Accept": "application/json",
+    }
+
+    import httpx  # already installed
+
+    for attempt in range(1, 4):
+        try:
+            r = httpx.get(
+                f"https://{domain}/rest/api/3/myself",
+                headers=headers,
+                timeout=10,
+            )
+            if r.status_code == 200:
+                display_name = r.json().get("displayName", email)
+                _ok(f"Authenticated as: {display_name}")
+                break
+            elif r.status_code == 401:
+                _warn("Invalid credentials — check your email and API token")
+                if attempt < 3:
+                    email = _prompt(f"Email (attempt {attempt + 1}/3)", default=email)
+                    token = _prompt("API token")
+                    creds = base64.b64encode(f"{email}:{token}".encode()).decode()
+                    headers["Authorization"] = f"Basic {creds}"
+                    continue
+            else:
+                _warn(f"Unexpected response (HTTP {r.status_code})")
+        except httpx.RequestError as exc:
+            _warn(f"Network error: {exc}")
+        if attempt == 3:
+            _err("Could not validate Jira credentials after 3 attempts.")
+            _ok("Skipping Jira setup — you can re-run setup with --force later")
+            return {}
+
+    # Validate project key
+    try:
+        rp = httpx.get(
+            f"https://{domain}/rest/api/3/project/{project_key}",
+            headers=headers,
+            timeout=10,
+        )
+        if rp.status_code == 200:
+            proj_name = rp.json().get("name", project_key)
+            _ok(f"Project: {proj_name} ({project_key})")
+        elif rp.status_code == 404:
+            _warn(f"Project key '{project_key}' not found in {domain}")
+            _warn("Double-check the project key and try again with --force")
+            return {}
+        else:
+            _warn(f"Could not validate project (HTTP {rp.status_code}) — continuing anyway")
+    except httpx.RequestError as exc:
+        _warn(f"Network error checking project: {exc}")
+
+    # Collect preferences
+    print("  Issue type for action items:")
+    print("  [T] Task (default)   [S] Story")
+    issue_type_choice = _prompt("Choice [T/S]", default="T").upper()
+    issue_type = "Story" if issue_type_choice == "S" else "Task"
+
+    board_id = _prompt(
+        "Board ID for sprint assignment (from board URL …/boards/N — leave blank to skip)",
+        default="",
+    ).strip()
+
+    auto_push = _prompt("Auto-push to Jira after each meeting? [Y/n]", default="Y").upper()
+
+    _ok(f"Jira configured: {domain} / {project_key} / {issue_type}"
+        + (f" / board {board_id}" if board_id else ""))
+    result = {
+        "JIRA_ENABLED": "true",
+        "JIRA_DOMAIN": domain,
+        "JIRA_EMAIL": email,
+        "JIRA_API_TOKEN": token,
+        "JIRA_PROJECT_KEY": project_key,
+        "JIRA_ISSUE_TYPE": issue_type,
+        "JIRA_AUTO_PUSH": "true" if auto_push != "N" else "false",
+        "JIRA_CREATE_DECISIONS": "false",
+        "JIRA_ASSIGNEE_MAP": "{}",
+    }
+    if board_id:
+        result["JIRA_BOARD_ID"] = board_id
+    return result
+
+
 # ── Main ──────────────────────────────────────────────────────────────────────
 
 
@@ -438,6 +567,7 @@ def main() -> int:
     gmail_user = step_gmail(existing)
     llm_config = step_llm(existing)
     entity_id = step_gmail_oauth(composio_key, existing)
+    jira_config = step_jira(existing)
 
     env_values: dict[str, str] = {
         "COMPOSIO_API_KEY": composio_key,
@@ -445,9 +575,10 @@ def main() -> int:
         "COMPOSIO_BASE_URL": "https://backend.composio.dev",
         "GMAIL_USER": gmail_user,
         **llm_config,
+        **jira_config,
     }
 
-    _rule("Step 6 — Writing .env")
+    _rule("Step 7 — Writing .env")
     write_env(ENV_FILE, env_values)
     _ok(f".env written to {ENV_FILE}")
 
@@ -456,6 +587,9 @@ def main() -> int:
     print("    make backfill      # catch up on last 12 months of meetings")
     print("    make run           # one-off run (last hour)")
     print("    make start         # install background daemon (macOS)")
+    if jira_config:
+        print("    make jira-dry      # preview what would be pushed to Jira")
+        print("    make jira          # push all meeting notes to Jira now")
     print()
     print("  Open vault/ in Obsidian and enable the Dataview plugin.")
     print("  Start at: vault/_Dashboards/00 - Home.md")

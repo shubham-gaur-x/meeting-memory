@@ -43,3 +43,28 @@ class State:
 
     def stats(self) -> dict:
         return {"processed_total": len(self._data["processed"]), "last_run": self._data.get("last_run")}
+
+    def mark_jira(self, message_id: str, issues: list[dict], pushed_at: str) -> None:
+        """Attach jira_issues list to existing processed entry. Replaces on re-push."""
+        with self._lock:
+            entry = self._data["processed"].get(message_id)
+            if entry is None:
+                return
+            entry["jira_issues"] = issues
+            entry["jira_pushed_at"] = pushed_at
+
+    def jira_pushed(self, message_id: str) -> bool:
+        """True if jira_issues is a non-empty list for this message_id."""
+        entry = self._data["processed"].get(message_id)
+        if entry is None:
+            return False
+        issues = entry.get("jira_issues")
+        return isinstance(issues, list) and len(issues) > 0
+
+    def get_unpushed(self) -> list[tuple[str, dict]]:
+        """Entries with a note path but no jira_issues. For push_to_jira.py backfill."""
+        result = []
+        for message_id, entry in self._data["processed"].items():
+            if entry.get("note") and not self.jira_pushed(message_id):
+                result.append((message_id, entry))
+        return result

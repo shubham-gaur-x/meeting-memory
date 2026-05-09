@@ -8,7 +8,7 @@ LABEL   := com.meeting-memory
 
 .DEFAULT_GOAL := help
 
-.PHONY: help install setup run backfill start stop status logs reset
+.PHONY: help install setup run backfill start stop status logs reset jira jira-dry
 
 help: ## Show available commands
 	@grep -E '^[a-zA-Z_-]+:.*?##' $(MAKEFILE_LIST) \
@@ -51,3 +51,9 @@ logs: ## Tail live daemon logs (Ctrl-C to exit)
 reset: _venv_guard ## Wipe state.json so all emails are re-processed on next run
 	$(PYTHON) -c "import json; open('state.json','w').write(json.dumps({'processed':{},'last_run':None}, indent=2))"
 	@echo "  ✓ state.json reset"
+
+jira: _venv_guard ## Push unpushed meeting notes to Jira
+	$(PYTHON) scripts/push_to_jira.py
+
+jira-dry: _venv_guard ## Preview what would be pushed to Jira (no API calls)
+	$(PYTHON) scripts/push_to_jira.py --dry-run

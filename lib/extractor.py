@@ -39,7 +39,7 @@ Schema (return ONLY JSON, no prose):
   "topics": [str],               // 3-8 short topical tags, lowercase, kebab-case
   "decisions": [str],            // each a single declarative sentence; [] if none
   "action_items": [
-     { "owner": str|null, "task": str, "due": "YYYY-MM-DD"|null, "done": false }
+     { "owner": str|null, "task": str, "due": "YYYY-MM-DD"|null, "done": false, "priority": "high"|"medium"|"low" }
   ],
   "key_quotes": [str],           // up to 3 short quotes (<25 words each), only if a transcript is included
   "links": [str],                // recording/transcript/doc URLs (deduped)
@@ -54,6 +54,7 @@ Rules:
 - Names should be Title Case. Emails should be lowercase.
 - Topics: short (1-3 words), kebab-case, no leading #.
 - Action items: if no explicit owner, infer from context; otherwise leave owner null.
+- Action item priority: "high" = blocking or explicitly urgent (must be done this week, ASAP, before next meeting); "medium" = important with a clear deadline within the month; "low" = nice-to-have, far future, or no clear deadline.
 - Output JSON only. No markdown fences. No commentary."""
 
 
