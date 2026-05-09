@@ -1,0 +1,10 @@
+# Composio is talked to over plain HTTP (httpx). The official SDK is
+# avoided on purpose — composio-core 0.7.x has a pydantic v2 schema bug
+# that crashes import.
+anthropic>=0.40.0
+python-dotenv>=1.0.1
+python-dateutil>=2.9.0
+beautifulsoup4>=4.12.3
+pyyaml>=6.0.1
+rich>=13.7.1
+httpx>=0.27.0

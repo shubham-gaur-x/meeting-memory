@@ -1,0 +1,33 @@
+# Credentials & runtime state — never commit these
+.env
+state.json
+logs/
+
+# Vault personal data — _Dashboards/ and _Templates/ stay in repo
+vault/Meetings/
+vault/People/
+vault/Topics/
+
+# Python
+.venv/
+__pycache__/
+*.py[cod]
+*.egg-info/
+dist/
+build/
+
+# macOS
+.DS_Store
+Thumbs.db
+
+# Obsidian local UI state (contains recent-file history — personal)
+vault/.obsidian/workspace.json
+vault/.obsidian/workspace-mobile.json
+
+# Internal dev tooling
+docs/superpowers/
+
+# Claude Code — all tooling files stay local, never in the repo
+/.claude/
+/CLAUDE.md
+/docs/superpowers/
