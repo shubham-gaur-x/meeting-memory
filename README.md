@@ -1,10 +1,11 @@
 # meeting-memory
 
-Turns every meeting-related email in your Gmail into a structured Markdown note in an [Obsidian](https://obsidian.md) vault, with Dataview dashboards for People, Topics, Decisions, Action Items, and a Weekly Digest.
+Turns every meeting-related email in your Gmail into a structured Markdown note in an [Obsidian](https://obsidian.md) vault — and optionally creates Jira stories from action items automatically.
 
 ```
 Gmail ──Composio OAuth──▶ ingest.py ──LLM extract──▶ vault/Meetings/*.md
                                                   └──▶ vault/People/*.md
+                                                  └──▶ Jira (if enabled)
                                                             │
                                                Dataview dashboards (Obsidian)
 ```
@@ -39,6 +40,76 @@ make logs       # tail live daemon output
 make stop       # stop the daemon
 make reset      # wipe state — re-processes everything on next run
 ```
+
+---
+
+## Jira integration
+
+Automatically creates Jira stories from meeting action items. The LLM assigns each action item a priority (`high`, `medium`, or `low`). **High-priority issues go directly into the active sprint; medium and low stay in the backlog.**
+
+### Setup
+
+Run the setup wizard and fill in Step 6:
+
+```bash
+python setup.py --force
+```
+
+Or add these to your `.env` manually:
+
+```bash
+JIRA_ENABLED=true
+JIRA_DOMAIN=yourcompany.atlassian.net   # no https://
+JIRA_EMAIL=you@company.com
+JIRA_API_TOKEN=                          # id.atlassian.com → Security → API tokens
+JIRA_PROJECT_KEY=PROJ                    # e.g. PROJ, ENG, SCRUM
+JIRA_BOARD_ID=1                          # numeric ID from board URL …/boards/1
+JIRA_ISSUE_TYPE=Task                     # Task | Story
+```
+
+### How priority routing works
+
+The LLM extracts a `priority` field for every action item based on context:
+
+| Priority | When | Jira destination |
+|----------|------|-----------------|
+| `high` | Blocking, urgent, due this week, or "ASAP" | **Active sprint** |
+| `medium` | Important, deadline within the month | Backlog |
+| `low` | Nice-to-have, far future, or no deadline | Backlog |
+
+For notes processed before the priority field was added, a due-date heuristic applies: due within 14 days → high, within 60 days → medium, else low.
+
+### What each Jira issue contains
+
+Each issue is created with:
+- **Summary** — the action item task text
+- **Priority** — mapped to Jira's High / Medium / Low field
+- **Due date** — if extracted from the meeting email
+- **Labels** — `meeting-generated` + topic tags from the meeting
+- **Description** — meeting title, date, summary, decisions made, attendees, and a deep link back to the Obsidian note
+
+### Backfill and manual push
+
+```bash
+make jira-dry                                  # preview what would be pushed
+make jira                                      # push all unpushed notes
+python scripts/push_to_jira.py --since 2026-05-01   # filter by date
+python scripts/push_to_jira.py --message-id <id>    # push one specific note
+python scripts/push_to_jira.py --force              # re-push already-pushed notes
+python scripts/push_to_jira.py --create-decisions   # also create issues for decisions
+```
+
+After a successful push, a `## Jira Issues` table is appended to the Obsidian note with clickable links to every created issue.
+
+### Assignee mapping
+
+To auto-assign issues, add a JSON map of owner names → Jira account IDs to `.env`:
+
+```bash
+JIRA_ASSIGNEE_MAP={"alice smith": "5f3d...", "bob jones": "6a1c..."}
+```
+
+Get account IDs from: `https://yourcompany.atlassian.net/rest/api/3/user/search?query=name`
 
 ---
 
@@ -91,9 +162,13 @@ lib/
   extractor.py         LLM extraction → structured Extracted dataclass
   obsidian_writer.py   Markdown + YAML frontmatter writer
   state.py             Processed-ID tracker (state.json)
+  utils.py             with_retry() — exponential backoff for all HTTP calls
+  jira_client.py       Jira Cloud REST API v3 client (Basic auth, retry, Agile API)
+  jira_pusher.py       Push logic, priority routing, ADF description builder
 scripts/
   backfill.py          Monthly-sliced deep backfill with progress bar
   listen.py            Long-running daemon with adaptive backoff + signal handling
+  push_to_jira.py      Standalone Jira backfill CLI
   install_launchd.sh   Register listen.py as a macOS launchd service
   uninstall_launchd.sh Remove the launchd service
 ```
