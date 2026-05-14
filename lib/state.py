@@ -61,6 +61,19 @@ class State:
         issues = entry.get("jira_issues")
         return isinstance(issues, list) and len(issues) > 0
 
+    def mark_memgraph(self, message_id: str, pushed_at: str) -> None:
+        """Record that this message_id was pushed to Memgraph."""
+        with self._lock:
+            entry = self._data["processed"].get(message_id)
+            if entry is None:
+                return
+            entry["memgraph_pushed_at"] = pushed_at
+
+    def memgraph_pushed(self, message_id: str) -> bool:
+        """Return True if this message_id has already been pushed to Memgraph."""
+        with self._lock:
+            return bool(self._data["processed"].get(message_id, {}).get("memgraph_pushed_at"))
+
     def get_unpushed(self) -> list[tuple[str, dict]]:
         """Entries with a note path but no jira_issues. For push_to_jira.py backfill."""
         result = []
