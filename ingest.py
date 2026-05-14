@@ -97,7 +97,27 @@ def _push_to_jira(client: Any, ex: Any, note_path: str, message_id: str, state: 
         console.print(f"  [yellow]jira push failed (non-fatal):[/yellow] {exc}")
 
 
-def process(messages, vault: Path, state: State, *, dry: bool, jira_client: Any | None = None) -> dict:
+def _push_to_memgraph(writer: Any, msg: Any, ex: Any, note_path: str, message_id: str, state: State) -> None:
+    """Push meeting graph to Memgraph. Errors are caught and logged — never fatal."""
+    try:
+        writer.write_meeting(msg, ex, note_path, message_id)
+        pushed_at = datetime.now(tz=timezone.utc).isoformat()
+        state.mark_memgraph(message_id, pushed_at)
+        console.print(f"  [magenta]memgraph[/magenta] {ex.title[:60]}")
+    except Exception as exc:
+        console.print(f"  [yellow]memgraph push failed (non-fatal):[/yellow] {exc}")
+
+
+def process(
+    messages,
+    vault: Path,
+    state: State,
+    *,
+    dry: bool,
+    jira_client: Any | None = None,
+    memgraph_writer: Any | None = None,
+    syncthing_client: Any | None = None,
+) -> dict:
     summary = {"total": 0, "skipped_seen": 0, "skipped_not_meeting": 0, "written": 0, "low_confidence": 0}
     for msg in messages:
         summary["total"] += 1
@@ -129,6 +149,10 @@ def process(messages, vault: Path, state: State, *, dry: bool, jira_client: Any 
         state.mark(msg.message_id, str(path), kind=ex.kind, confidence=ex.confidence)
         if jira_client is not None:
             _push_to_jira(jira_client, ex, str(path), msg.message_id, state)
+        if memgraph_writer is not None and not state.memgraph_pushed(msg.message_id):
+            _push_to_memgraph(memgraph_writer, msg, ex, str(path), msg.message_id, state)
+        if syncthing_client is not None:
+            syncthing_client.rescan()
         summary["written"] += 1
         console.print(f"  [green]wrote[/green] {path.relative_to(vault.parent)}")
     return summary
@@ -161,6 +185,29 @@ def main() -> int:
             console.print(f"[yellow]Jira init failed, auto-push disabled:[/yellow] {exc}")
             jira_client = None
 
+    # Initialize Memgraph writer if enabled
+    memgraph_writer = None
+    if os.getenv("MEMGRAPH_ENABLED", "false").lower() == "true" and not args.dry_run:
+        try:
+            from lib.memgraph_writer import MemgraphWriter
+            memgraph_writer = MemgraphWriter()
+            memgraph_writer.ping()
+            console.print("[magenta]Memgraph:[/magenta] connected")
+        except Exception as exc:
+            console.print(f"[yellow]Memgraph init failed, graph writes disabled:[/yellow] {exc}")
+            memgraph_writer = None
+
+    # Initialize Syncthing client if enabled
+    syncthing_client = None
+    if os.getenv("SYNCTHING_ENABLED", "false").lower() == "true" and not args.dry_run:
+        from lib.syncthing_client import SyncthingClient
+        syncthing_client = SyncthingClient()
+        if not syncthing_client.ping():
+            console.print("[yellow]Syncthing unreachable — vault sync disabled for this run[/yellow]")
+            syncthing_client = None
+        else:
+            console.print("[cyan]Syncthing:[/cyan] connected")
+
     if args.sample:
         folder = Path(args.sample).resolve()
         console.print(f"[bold]Loading sample messages[/bold] from {folder}")
@@ -174,7 +221,13 @@ def main() -> int:
         console.print(f"[bold]Gmail query:[/bold] {query}")
         messages = gmail.iter_messages(query=query, max_results=args.limit)
 
-    summary = process(messages, vault_path, state, dry=args.dry_run, jira_client=jira_client)
+    summary = process(
+        messages, vault_path, state,
+        dry=args.dry_run,
+        jira_client=jira_client,
+        memgraph_writer=memgraph_writer,
+        syncthing_client=syncthing_client,
+    )
     state.set_last_run(datetime.now(timezone.utc).isoformat())
     state.save()
 
