@@ -1,0 +1,5 @@
+# This directory is a Syncthing folder marker.
+# Do not delete.
+
+folderID: vault
+created: 2026-05-13T23:56:33-07:00

@@ -1,0 +1,9 @@
+{
+  "messageId": "e2e-test-001",
+  "subject": "Meeting notes: Platform Architecture Review",
+  "sender": "gemini-notes@google.com",
+  "to": "shubham.gaur@onixnet.com",
+  "cc": "",
+  "messageTimestamp": "2026-05-14T10:00:00Z",
+  "messageText": "Meeting notes: Platform Architecture Review\nDate: May 14, 2026\nTime: 10:00 AM - 11:00 AM\nPlatform: Google Meet\n\nAttendees:\n- Shubham Gaur (shubham.gaur@onixnet.com) - Lead Engineer\n- Matteo Vaiente (matteo.vaiente@onixnet.com) - Engineering Manager\n- Priya Sharma (priya.sharma@onixnet.com) - DevOps Engineer\n\nSummary:\nThe team reviewed the current platform architecture and discussed migrating the data pipeline from a monolithic ETL to a modular dbt-based approach. Key bottlenecks in the current Talend setup were identified. Agreement was reached on the migration timeline.\n\nTopics Discussed:\n- Current Talend ETL performance bottlenecks\n- dbt migration strategy and timeline\n- CI/CD pipeline improvements for data workflows\n- Team capacity planning for Q3\n\nDecisions:\n- Migrate to dbt by end of Q2 2026\n- Adopt GitHub Actions for CI/CD on all data pipelines\n- Shubham will lead the migration; Priya will handle infrastructure\n\nAction Items:\n1. Shubham Gaur: Create detailed migration plan for Talend-to-dbt by 2026-05-20\n2. Priya Sharma: Set up GitHub Actions pipeline template by 2026-05-21\n3. Matteo Vaiente: Schedule stakeholder sign-off meeting by 2026-05-17\n4. Shubham Gaur: Audit existing Talend jobs and classify by complexity by 2026-05-22\n\nNext Steps:\nFollow-up review scheduled for May 21, 2026."
+}
