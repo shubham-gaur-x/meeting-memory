@@ -8,7 +8,7 @@ LABEL   := com.meeting-memory
 
 .DEFAULT_GOAL := help
 
-.PHONY: help install setup run backfill start stop status logs reset jira jira-dry
+.PHONY: help install setup run backfill start stop status logs reset jira jira-dry memgraph memgraph-dry syncthing-status
 
 help: ## Show available commands
 	@grep -E '^[a-zA-Z_-]+:.*?##' $(MAKEFILE_LIST) \
@@ -57,3 +57,15 @@ jira: _venv_guard ## Push unpushed meeting notes to Jira
 
 jira-dry: _venv_guard ## Preview what would be pushed to Jira (no API calls)
 	$(PYTHON) scripts/push_to_jira.py --dry-run
+
+memgraph: _venv_guard ## Push all vault notes to Memgraph graph database
+	$(PYTHON) scripts/push_to_memgraph.py
+
+memgraph-dry: _venv_guard ## Preview what push_to_memgraph.py would write (no DB calls)
+	$(PYTHON) scripts/push_to_memgraph.py --dry-run
+
+syncthing-status: ## Show Syncthing vault folder sync status
+	@curl -sf \
+	  -H "X-API-Key: $$(grep '^SYNCTHING_API_KEY' .env | cut -d= -f2)" \
+	  "http://127.0.0.1:8384/rest/db/status?folder=$$(grep '^SYNCTHING_FOLDER_ID' .env | cut -d= -f2)" \
+	  | python3 -m json.tool || echo "  Syncthing not reachable (is it running?)"
